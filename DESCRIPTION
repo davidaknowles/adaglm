@@ -1,0 +1,15 @@
+Package: adaglm
+Type: Package
+Title: Negative binomial (and Poisson) Regression fitting with Stochastic Gradient Descent/Adam
+Version: 0.1.0
+Author: David A Knowles
+Maintainer: David A Knowles <dak2173@columbia.edu>
+Description: Includes a reasonable strategy for fitting the concentration/dispersion parameter. 
+License: GPL3. 
+Encoding: UTF-8
+LazyData: true
+Suggests: 
+    knitr,
+    rmarkdown,
+    MASS
+VignetteBuilder: knitr
