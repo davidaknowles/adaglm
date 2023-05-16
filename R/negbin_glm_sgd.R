@@ -239,12 +239,12 @@ nb_glm_wrapper = function(
   if (return_y) fit$y = y
   if (return_model) fit$model <- mf
 
-  class(fit) <- c("negbin", "glm", "lm")
+  class(fit) <- c("adanb", "glm", "lm")
 
   fit
 }
 
-anova.negbin <- function(..., test = "Chisq")
+anova.adanb <- function(..., test = "Chisq")
 {
   if(test != "Chisq")
       warning("only Chi-squared LR tests are implemented")
@@ -253,8 +253,8 @@ anova.negbin <- function(..., test = "Chisq")
   dflis <- sapply(mlist, function(x) x$df.residual)
   s <- sort.list(dflis)
   mlist <- mlist[s]
-  if(any(!sapply(mlist, inherits, "negbin")))
-    stop("not all objects are of class \"negbin\"")
+  if(any(!sapply(mlist, inherits, "adanb")))
+    stop("not all objects are of class \"adanb\"")
   rsp <- unique(sapply(mlist, function(x) paste(formula(x)[2L])))
   mds <- sapply(mlist, function(x) paste(formula(x)[3L]))
   ths <- sapply(mlist, function(x) x$theta)
@@ -276,7 +276,7 @@ anova.negbin <- function(..., test = "Chisq")
   out
 }
 
-summary.negbin = function (object,  ...) {
+summary.adanb = function (object,  ...) {
   est.disp <- FALSE
   df.r <- object$df.residual
 

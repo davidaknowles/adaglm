@@ -1,1 +1,5 @@
-exportPattern("^[[:alpha:]]+")
+# exportPattern("^[[:alpha:]]+")
+export(sgd_glm, smart_fit_nb_glm, nb_glm_wrapper, init_adam, adam_update)
+
+S3method(anova, adanb)
+S3method(summary, adanb)
