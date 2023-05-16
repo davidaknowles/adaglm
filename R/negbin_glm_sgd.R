@@ -59,7 +59,6 @@ sgd_glm = function(
     conc = 10.,
     learn_beta = T,
     learn_conc = T,
-    true_beta = NULL,
     batch_size = 100,
     epochs = 100,
     loglik_tol = 0.01,
@@ -88,12 +87,10 @@ sgd_glm = function(
     sample.int(N),
     ceiling(seq(1,N)/batch_size))
 
-  true_cor = NA
-
   old_loglik = -Inf
   logliks = c()
 
-  if (verbose) cat("epoch", "loglik", "conc", "mean(abs(b))", "true_cor", "\n")
+  if (verbose) cat("epoch", "loglik", "conc", "\n")
 
   for (epoch in 1:epochs){
 
@@ -102,10 +99,9 @@ sgd_glm = function(
     if (learn_beta) b = adam_state$parameters$b
     if (learn_conc) conc = exp(adam_state$parameters$logconc)
 
-    if (!is.null(true_beta)) true_cor = cor(true_beta, b)
-
     ll = loglik(conc, exp(X %*% b), y, w)
-    if (verbose) cat(epoch, ll, conc, mean(abs(b)), true_cor, "\n")
+    if (verbose) cat(epoch, ll, conc, "\n")
+
     logliks = c(logliks, ll)
     if (abs(ll - old_loglik) < loglik_tol) break
     old_loglik = ll
@@ -116,25 +112,26 @@ sgd_glm = function(
 }
 
 # ... is passed to sgd_glm
-smart_fit_nb_glm = function(X, y, w, consider_poisson = T, true_b = NULL, ...) {
+smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
 
-  # 1. lm based initialization
   P = ncol(X)
+  if (verbose) cat("1. Linear model based initialization\n")
   b = if (P > 0) solve(t(X) %*% X, t(X) %*% log(y + 0.1)) else numeric(0)
   # loglik_poisson(1, exp(X %*% b), y, w) # this is surprisingly bad
 
-  # 2. fit beta under Poisson GLM
-  res = sgd_glm(X, y, b = b, true_beta = true_b, conc = Inf, learn_beta = T, learn_conc = F, ...)
+  if (verbose) cat("2. Fit Poisson GLM\n")
+  res = sgd_glm(X, y, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbose = verbose, ...)
 
   b_pois = res$adam_state$parameters$b
   mu_pois = exp(X %*% b_pois)
   ll_poi = loglik_poisson(1, mu_pois, y, w)
 
-  #  3. fit concentration. it doesn't seem to hurt to also update beta at this stage.
+  if (verbose) cat("3. Fit concentration parameter under NB GLM\n")
+  # it doesn't seem to hurt to also update beta at this stage.
   # should we regularize (log)conc a bit? if the data is Poisson (not overdispersed) then i believe
   # the likelihood is flat for conc -> inf, which is a bit weird for optimization
   conc = 1
-  res = sgd_glm(X, y, b = b_pois, conc = conc, true_beta = true_b, learn_beta = T, learn_conc = T, ...)
+  res = sgd_glm(X, y, b = b_pois, conc = conc, learn_beta = T, learn_conc = T, verbose = verbose, ...)
   b = res$adam_state$parameters$b
   conc = exp(res$adam_state$parameters$logconc)
 
@@ -187,6 +184,7 @@ nb_glm_wrapper = function(
     return_x = FALSE,
     return_y = FALSE,
     contrasts = NULL,
+    verbose = F,
     ...) {
 
   mf <- Call <- match.call() # mf = model frame
@@ -204,19 +202,19 @@ nb_glm_wrapper = function(
   else if(any(w < 0)) stop("negative weights not allowed")
   offset <- model.offset(mf) # can't currently handle this
 
-  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, ...) else sgd_glm(X, y, conc = conc, learn_beta = T, learn_conc = F, ...)
-
-  # consider_poisson = T, true_b = NULL
+  if (verbose) cat("Fitting NB GLM.\n")
+  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, verbose = verbose, ...) else sgd_glm(X, y, conc = conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
 
   X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 
-  null_fit = sgd_glm(X_null, y, conc = myfit$conc, learn_beta = T, learn_conc = F, ...)
+  if (verbose) cat("Fitting null model\n")
+  null_fit = sgd_glm(X_null, y, conc = myfit$conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
   null.deviance = -2. * null_fit$logliks[length(null_fit$logliks)] # might be better to fix conc here?
   eta = X %*% myfit$b
 
   fit = list(
     call = Call,
-    rank = ncol(X), # assumes no collinearity
+    rank = ncol(X), # assumes no colinearity
     df.residual = ncol(X) - ncol(X_null),
     null.deviance = null.deviance,
     df.null = ncol(X_null),
