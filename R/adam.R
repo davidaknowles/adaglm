@@ -1,4 +1,10 @@
 
+#' Perform an iteration of Adam otpimization
+#'
+#' @param g The gradient for the current minibatch
+#' @param adam_state Created by init_adam
+#'
+#' @export
 adam_update = function(g, adam_state) {
 
   adam_state$iteration <- adam_state$iteration + 1
@@ -23,6 +29,15 @@ adam_update = function(g, adam_state) {
   adam_state
 }
 
+#' Initialize state for Adam optimization
+#'
+#' @param parameters (Named) list of initial parameters
+#' @param beta1 Controls forgetting rate for E[g]
+#' @param beta2 Controls forgetting rate for E[g^2]
+#' @param epsilon Prevents divide by 0
+#' @param learning_rate I think you can guess this one.
+#'
+#' @export
 init_adam = function(
     parameters,
     beta1 = 0.9,

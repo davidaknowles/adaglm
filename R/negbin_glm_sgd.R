@@ -1,35 +1,44 @@
-loglik_nb <- function(conc, mu, y, w)
-  sum(w*(lgamma(conc + y) - lgamma(conc) - lgamma(y + 1) + conc * log(conc) +
+#' Negative binomial log likelihood function
+#'
+#' Gives Poisson if conc is infinite.
+#'
+#' @param conc The concentration parameter = 1/dispersion.
+#' @param mu The mean, a N-vector
+#' @param y The observed counts, an N-vector.
+#' @param w Observation weights.
+#'
+#' @returns Log likelihood (scalar)
+loglik <- function(conc, mu, y, w)
+  if (is.finite(conc)) {
+    sum(w*(lgamma(conc + y) - lgamma(conc) - lgamma(y + 1) + conc * log(conc) +
            y * log(mu + (y == 0)) - (conc + y) * log(conc + mu)))
+  } else { # Poisson
+    sum(w*( y * log(mu + (y == 0)) - mu - lgamma(y + 1)))
+  }
 
-loglik_poisson <- function(conc, mu, y, w)
-  sum(w*( y * log(mu + (y == 0)) - mu - lgamma(y + 1)))
-
+#' Gradient of the NB log likelihood wrt to the concentration
 grad_conc <- function(conc, mu, y, w) # derivative wrt conceta (concentration)
-  sum(w*(digamma(conc + y) - digamma(conc) + log(conc) +
-           1 - log(conc + mu) - (y + conc)/(mu + conc)))
+    sum(w*(digamma(conc + y) - digamma(conc) + log(conc) +
+             1 - log(conc + mu) - (y + conc)/(mu + conc)))
 
+#' Gradient of the NB log likelihood wrt to the mean
+grad_mu <- function(conc, mu, y, w)
+  w * (y / (mu + (y == 0)) - if (is.finite(conc)) {(conc + y) / (conc + mu)} else 1)
+
+#' Hessian of the NB log likelihood wrt to the concentration
 neg_hess_conc <- function(conc, mu, y, w) # just for getting SE
   sum(w*( - trigamma(conc + y) + trigamma(conc) - 1/conc +
             2/(mu + conc) - (y + conc)/(mu + conc)^2))
 
-grad_nb_mu <- function(conc, mu, y, w)
-  w * (y / (mu + (y == 0)) - (conc + y) / (conc + mu))
-
-grad_poisson_mu <- function(conc, mu, y, w)
-  w * (y / (mu + (y == 0)) - 1)
-
+#' Hessian of the NB log likelihood wrt to the mean
 neg_hess_mu <- function(conc, mu, y, w)
-  w * (y / (mu + (y == 0))^2 + (conc + y) / (conc + mu)^2)
+  w * (y / (mu + (y == 0))^2 + if (is.finite(conc)) {(conc + y) / (conc + mu)^2} else 0)
 
-neg_hess_poisson_mu <- function(conc, mu, y, w)
-  w * (y / (mu + (y == 0))^2 )
-
+#' Off-diagonal block of the Hessian of the NB log likelihood wrt to the mu and conc jointly
 hess_conc_mu <- function(conc, mu, y, w)
   w * (y - mu) / (mu + conc)^2
 
-
-one_epoch = function(adam_state, X, y, w, batches, grad_mu = grad_nb_mu, b = NULL, conc = NULL, learn_beta = T, learn_conc = T) {
+one_epoch = function(adam_state, X, y, w, batches, b = NULL, conc = NULL, learn_beta = T, learn_conc = T) {
   for (batch in batches) {
     y_batch = y[batch]
     w_batch = w[batch]
@@ -51,6 +60,25 @@ one_epoch = function(adam_state, X, y, w, batches, grad_mu = grad_nb_mu, b = NUL
   adam_state
 }
 
+#' Fit negative binomial (or Poisson) regression using Adam
+#'
+#' @param X NxP matrix of samples x covariates
+#' @param y N-vector of observed counts
+#' @param w Optional N-vector of observation weights
+#' @param b Optional P-vector of coefficients. This is the initialization if b is being learned,
+#' @param conc Optional concentration parameter. This is the initialization if conc is being learned.
+#' @param learn_beta Whether to optimize the coefficients.
+#' @param learn_conc Whether to optimize the concentration parameter.
+#' @param batch_size For Adam
+#' @param epochs Number of sweeps through dataset
+#' @param loglik_tol Once the loglikelihood changes by less than this, stop.
+#' @param verbose Whether to output fitting info
+#' @param ... passed to init_adam so can be used to specify e.g. learning_rate.
+#'
+#' @returns Vector of log likelihoods through optimization (one per epoch).
+#' @return adam_state list.
+#'
+#' @export
 sgd_glm = function(
     X,
     y,
@@ -66,14 +94,7 @@ sgd_glm = function(
     ... # to pass to init_adam
 ) {
 
-  if (is.infinite(conc)) {
-    grad_mu = grad_poisson_mu
-    loglik = loglik_poisson
-    stopifnot(!learn_conc)
-  } else {
-    grad_mu = grad_nb_mu
-    loglik = loglik_nb
-  }
+  if (is.infinite(conc)) stopifnot(!learn_conc)
 
   N = nrow(X)
   P = ncol(X)
@@ -87,14 +108,18 @@ sgd_glm = function(
     sample.int(N),
     ceiling(seq(1,N)/batch_size))
 
-  old_loglik = -Inf
-  logliks = c()
+  old_loglik = loglik(conc, exp(X %*% b), y, w)
 
-  if (verbose) cat("epoch", "loglik", "conc", "\n")
+  logliks = old_loglik
+
+  if (verbose) {
+    cat("epoch", "loglik", "conc", "\n")
+    cat(0, old_loglik, conc, "\n")
+  }
 
   for (epoch in 1:epochs){
 
-    adam_state = one_epoch(adam_state, X, y, w, batches, grad_mu = grad_mu, b = b, conc = conc, learn_beta = learn_beta, learn_conc = learn_conc)
+    adam_state = one_epoch(adam_state, X, y, w, batches, b = b, conc = conc, learn_beta = learn_beta, learn_conc = learn_conc)
 
     if (learn_beta) b = adam_state$parameters$b
     if (learn_conc) conc = exp(adam_state$parameters$logconc)
@@ -111,20 +136,30 @@ sgd_glm = function(
   list(logliks = logliks, adam_state = adam_state)
 }
 
-# ... is passed to sgd_glm
+#' Fit negative binomial (or Poisson) regression using Adam
+#'
+#" Jointly optimizing the coefficients and concentration parameter from arbitrary points has poor learning dynamics. The initially poor coefficients result in an artifically small concentration. An effective solution is: 1) Fit a Poisson GLM. 2) Starting with coefficients initalized from the Poisson GLM, fit a NB GLM jointly optimizing the coefficients and concentration.
+#'
+#' @param X NxP matrix of samples x covariates
+#' @param y N-vector of observed counts
+#' @param w Optional N-vector of observation weights
+#' @param consider_poisson Whether to compare the final NB GLM fit to the Poisson GLM and choose the later if it has higher loglikelihood. .
+#' @param verbose Whether to output fitting info
+#' @param ... passed to sgd_glm
+#'
+#' @export
 smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
 
   P = ncol(X)
   if (verbose) cat("1. Linear model based initialization\n")
   b = if (P > 0) solve(t(X) %*% X, t(X) %*% log(y + 0.1)) else numeric(0)
-  # loglik_poisson(1, exp(X %*% b), y, w) # this is surprisingly bad
 
   if (verbose) cat("2. Fit Poisson GLM\n")
   res = sgd_glm(X, y, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbose = verbose, ...)
 
   b_pois = res$adam_state$parameters$b
   mu_pois = exp(X %*% b_pois)
-  ll_poi = loglik_poisson(1, mu_pois, y, w)
+  ll_poi = loglik(Inf, mu_pois, y, w)
 
   if (verbose) cat("3. Fit concentration parameter under NB GLM\n")
   # it doesn't seem to hurt to also update beta at this stage.
@@ -136,14 +171,14 @@ smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
   conc = exp(res$adam_state$parameters$logconc)
 
   mu = exp(X %*% b)
-  ll = loglik_nb(conc, mu, y, w)
+  ll = loglik(conc, mu, y, w)
 
   if (consider_poisson && (ll_poi > ll)) {
     b = b_pois
     ll = ll_poi
     conc = Inf
     mu = mu_pois
-    dia = mu * grad_poisson_mu(conc, mu, y, w) - mu^2 * neg_hess_poisson_mu(conc, mu, y, w)
+    dia = mu * grad_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
     hess_b = t(X) %*% sweep(X, 1, dia, "*")
     cov_b = chol2inv(chol(-hess_b))
     se_b = sqrt(diag(cov_b))
@@ -154,7 +189,7 @@ smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
     hess_c = -neg_hess_conc(conc, mu, y, w) * conc^2 + grad_conc(conc, mu, y, w) * conc
     # se_logconc = sqrt(-1/hess_c)
 
-    dia = mu * grad_nb_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
+    dia = mu * grad_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
     hess_b = t(X) %*% sweep(X, 1, dia, "*")
 
     # cov_b = chol2inv(chol(-hess_b))
@@ -175,7 +210,23 @@ smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
   list(b = b, conc = conc, loglik = ll, se_beta = se_beta, se_logconc = se_logconc)
 }
 
-nb_glm_wrapper = function(
+#' Main function for fitting negative binomial or Poisson GLM using Adam.
+#'
+#' This aims to have roughly the same functionality as `base::glm`. Offsets are not currently supported however, and currently only log link can be used.
+#'
+#' @param formula an object of class "formula" (or one that can be coerced to that class): a symbolic description of the model to be fitted.
+#' @param data an optional data frame, list or environment (or object coercible by as.data.frame to a data frame) containing the variables in the model. If not found in data, the variables are taken from environment(formula), typically the environment from which adaglm is called.
+#' @param weights an optional vector of ‘prior weights’ to be used in the fitting process. Should be NULL or a numeric vector.
+#' @param conc Concentration parameter. NULL to learn it, or can be fixed to some value. Setting conc=Inf gives Poisson GLM.
+#' @param return_x Whether to return the model matrix
+#' @param return_y Whether to return the response vector
+#' @param return_model Whether to return the model frame.
+#' @param contrasts an optional list. See the contrasts.arg of model.matrix.default.
+#' @param verbose Whether to print fitting info
+#' @param ... Passed to smart_fit_nb_glm, then sgd_glm, and finally init_adam. Can control the optimization through `batch_size`, `epochs`, `loglik_tol`, `beta1`, `beta2`, `epsilon` and `learning_rate`.
+#'
+#' @export
+adaglm = function(
     formula,
     data,
     weights,
@@ -242,6 +293,7 @@ nb_glm_wrapper = function(
   fit
 }
 
+#' @export
 anova.adanb <- function(..., test = "Chisq")
 {
   if(test != "Chisq")
@@ -274,6 +326,7 @@ anova.adanb <- function(..., test = "Chisq")
   out
 }
 
+#' @export
 summary.adanb = function (object,  ...) {
   est.disp <- FALSE
   df.r <- object$df.residual
