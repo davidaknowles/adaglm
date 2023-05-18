@@ -38,13 +38,13 @@ neg_hess_mu <- function(conc, mu, y, w)
 hess_conc_mu <- function(conc, mu, y, w)
   w * (y - mu) / (mu + conc)^2
 
-one_epoch = function(adam_state, X, y, w, batches, b = NULL, conc = NULL, learn_beta = T, learn_conc = T) {
+one_epoch = function(adam_state, X, y, w, o, batches, b = NULL, conc = NULL, learn_beta = T, learn_conc = T) {
   for (batch in batches) {
     y_batch = y[batch]
     w_batch = w[batch]
     X_batch = X[batch,,drop=F]
     if (learn_beta) b = adam_state$parameters$b
-    mu = exp(X_batch %*% b)
+    mu = exp(X_batch %*% b + o[batch])
 
     if (learn_conc) conc = exp(adam_state$parameters$logconc)
 
@@ -83,6 +83,7 @@ sgd_glm = function(
     X,
     y,
     w = numeric(nrow(X))+1,
+    o = numeric(nrow(X)),
     b = numeric(ncol(X)), # initial coefficients
     conc = 10.,
     learn_beta = T,
@@ -108,7 +109,7 @@ sgd_glm = function(
     sample.int(N),
     ceiling(seq(1,N)/batch_size))
 
-  old_loglik = loglik(conc, exp(X %*% b), y, w)
+  old_loglik = loglik(conc, exp(X %*% b + o), y, w)
 
   logliks = old_loglik
 
@@ -119,12 +120,12 @@ sgd_glm = function(
 
   for (epoch in 1:epochs){
 
-    adam_state = one_epoch(adam_state, X, y, w, batches, b = b, conc = conc, learn_beta = learn_beta, learn_conc = learn_conc)
+    adam_state = one_epoch(adam_state, X, y, w, o, batches, b = b, conc = conc, learn_beta = learn_beta, learn_conc = learn_conc)
 
     if (learn_beta) b = adam_state$parameters$b
     if (learn_conc) conc = exp(adam_state$parameters$logconc)
 
-    ll = loglik(conc, exp(X %*% b), y, w)
+    ll = loglik(conc, exp(X %*% b + o), y, w)
     if (verbose) cat(epoch, ll, conc, "\n")
 
     logliks = c(logliks, ll)
@@ -148,17 +149,17 @@ sgd_glm = function(
 #' @param ... passed to sgd_glm
 #'
 #' @export
-smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
+smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbose = F, ...) {
 
   P = ncol(X)
   if (verbose) cat("1. Linear model based initialization\n")
   b = if (P > 0) solve(t(X) %*% X, t(X) %*% log(y + 0.1)) else numeric(0)
 
   if (verbose) cat("2. Fit Poisson GLM\n")
-  res = sgd_glm(X, y, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbose = verbose, ...)
+  res = sgd_glm(X, y, w, o, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbose = verbose, ...)
 
   b_pois = res$adam_state$parameters$b
-  mu_pois = exp(X %*% b_pois)
+  mu_pois = exp(X %*% b_pois + o)
   ll_poi = loglik(Inf, mu_pois, y, w)
 
   if (verbose) cat("3. Fit concentration parameter under NB GLM\n")
@@ -166,11 +167,11 @@ smart_fit_nb_glm = function(X, y, w, consider_poisson = T, verbose = F, ...) {
   # should we regularize (log)conc a bit? if the data is Poisson (not overdispersed) then i believe
   # the likelihood is flat for conc -> inf, which is a bit weird for optimization
   conc = 1
-  res = sgd_glm(X, y, b = b_pois, conc = conc, learn_beta = T, learn_conc = T, verbose = verbose, ...)
+  res = sgd_glm(X, y, w, o, b = b_pois, conc = conc, learn_beta = T, learn_conc = T, verbose = verbose, ...)
   b = res$adam_state$parameters$b
   conc = exp(res$adam_state$parameters$logconc)
 
-  mu = exp(X %*% b)
+  mu = exp(X %*% b + o)
   ll = loglik(conc, mu, y, w)
 
   if (consider_poisson && (ll_poi > ll)) {
@@ -251,17 +252,17 @@ adaglm = function(
   w <- model.weights(mf)
   if(!length(w)) w <- rep(1, nrow(mf))
   else if(any(w < 0)) stop("negative weights not allowed")
-  offset <- model.offset(mf) # can't currently handle this
-
+  o <- model.offset(mf)
+  if (is.null(o)) o = y*0
   if (verbose) cat("Fitting NB GLM.\n")
-  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, verbose = verbose, ...) else sgd_glm(X, y, conc = conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
+  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, o, verbose = verbose, ...) else sgd_glm(X, y, w, o, conc = conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
 
   X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 
   if (verbose) cat("Fitting null model\n")
-  null_fit = sgd_glm(X_null, y, conc = myfit$conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
+  null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
   null.deviance = -2. * null_fit$logliks[length(null_fit$logliks)] # might be better to fix conc here?
-  eta = X %*% myfit$b
+  eta = X %*% myfit$b + o
 
   fit = list(
     call = Call,
