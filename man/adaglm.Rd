@@ -13,7 +13,7 @@ adaglm(
   return_x = FALSE,
   return_y = FALSE,
   contrasts = NULL,
-  verbose = F,
+  verbosity = 0,
   ...
 )
 }
@@ -34,7 +34,7 @@ adaglm(
 
 \item{contrasts}{an optional list. See the contrasts.arg of model.matrix.default.}
 
-\item{verbose}{Whether to print fitting info}
+\item{verbosity}{Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)}
 
 \item{...}{Passed to smart_fit_nb_glm, then sgd_glm, and finally init_adam. Can control the optimization through `batch_size`, `epochs`, `loglik_tol`, `beta1`, `beta2`, `epsilon` and `learning_rate`.}
 }

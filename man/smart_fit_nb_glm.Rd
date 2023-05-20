@@ -4,7 +4,7 @@
 \alias{smart_fit_nb_glm}
 \title{Fit negative binomial (or Poisson) regression using Adam}
 \usage{
-smart_fit_nb_glm(X, y, w, consider_poisson = T, verbose = F, ...)
+smart_fit_nb_glm(X, y, w, o, consider_poisson = T, verbosity = 0, ...)
 }
 \arguments{
 \item{X}{NxP matrix of samples x covariates}
@@ -13,9 +13,11 @@ smart_fit_nb_glm(X, y, w, consider_poisson = T, verbose = F, ...)
 
 \item{w}{Optional N-vector of observation weights}
 
+\item{o}{Offsets}
+
 \item{consider_poisson}{Whether to compare the final NB GLM fit to the Poisson GLM and choose the later if it has higher loglikelihood. .}
 
-\item{verbose}{Whether to output fitting info}
+\item{verbosity}{Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)}
 
 \item{...}{passed to sgd_glm}
 }

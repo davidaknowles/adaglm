@@ -35,7 +35,13 @@ head(df)
 ```
 Fit to obtain `glm` object. 
 ```{r}
-my_nb_fit = adaglm(y ~ . - offs + offset(offs), data = df, verbose = F, loglik_tol = 0.1)
+my_nb_fit = adaglm(
+  y ~ . - offs + offset(offs), 
+  data = df,
+  batch_size = 200,
+  verbosity = 2)
+```
+```{r}
 plot(c(0, true_b), my_nb_fit$coefficients, ylab = "Estimated coefficients", xlab = "True coefficients")
 ```
 
@@ -52,7 +58,11 @@ summary(my_nb_fit) # just "summary" should work here but gets
 
 Use a likelihood ratio test to determine significance of one covariate (V1). 
 ```{r}
-my_nb_fit_null = adaglm(y ~ . - offs + offset(offs) - V1, data = df, verbose = F, loglik_tol = 0.1)
+my_nb_fit_null = adaglm(
+  y ~ . - offs + offset(offs) - V1, 
+  data = df, 
+  batch_size = 200,
+  verbosity = 2)
 summary(my_nb_fit_null)
 ```
 

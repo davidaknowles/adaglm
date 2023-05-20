@@ -8,14 +8,15 @@ sgd_glm(
   X,
   y,
   w = numeric(nrow(X)) + 1,
+  o = numeric(nrow(X)),
   b = numeric(ncol(X)),
   conc = 10,
   learn_beta = T,
   learn_conc = T,
-  batch_size = 100,
-  epochs = 100,
-  loglik_tol = 0.01,
-  verbose = F,
+  batch_size = 10000,
+  epochs = 1000,
+  loglik_tol = 0.1,
+  verbosity = 0,
   ...
 )
 }
@@ -40,7 +41,7 @@ sgd_glm(
 
 \item{loglik_tol}{Once the loglikelihood changes by less than this, stop.}
 
-\item{verbose}{Whether to output fitting info}
+\item{verbosity}{Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)}
 
 \item{...}{passed to init_adam so can be used to specify e.g. learning_rate.}
 }

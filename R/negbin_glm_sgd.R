@@ -60,6 +60,40 @@ one_epoch = function(adam_state, X, y, w, o, batches, b = NULL, conc = NULL, lea
   adam_state
 }
 
+get_standard_errors = function(X, y, w, o, b, conc, learn_conc = T) {
+
+  mu = exp(X %*% b + o)
+
+  se_logconc = NA
+
+  dia = mu * grad_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
+  hess_b = t(X) %*% sweep(X, 1, dia, "*")
+
+  if (is.infinite(conc) || !learn_conc) {
+
+    cov_b = chol2inv(chol(-hess_b))
+    se_beta = sqrt(diag(cov_b))
+
+  } else {
+
+    hess_c = -neg_hess_conc(conc, mu, y, w) * conc^2 + grad_conc(conc, mu, y, w) * conc
+    # se_logconc = sqrt(-1/hess_c)
+
+    hess_b_conc = t(X) %*% (mu * hess_conc_mu(conc, mu, y, w) * conc) # off diagonal of hessian
+
+    joint_hess = rbind( cbind(hess_b, hess_b_conc), c(hess_b_conc, hess_c) )
+    joint_cov = chol2inv(chol(-joint_hess))
+
+    joint_se = sqrt(diag(joint_cov))
+    P = ncol(X)
+    se_beta = joint_se[1:P]
+    se_logconc = joint_se[P+1] # slightly wider SE than when just using hess_c
+
+  }
+
+  list(se_beta = se_beta, se_logconc = se_logconc)
+}
+
 #' Fit negative binomial (or Poisson) regression using Adam
 #'
 #' @param X NxP matrix of samples x covariates
@@ -72,7 +106,7 @@ one_epoch = function(adam_state, X, y, w, o, batches, b = NULL, conc = NULL, lea
 #' @param batch_size For Adam
 #' @param epochs Number of sweeps through dataset
 #' @param loglik_tol Once the loglikelihood changes by less than this, stop.
-#' @param verbose Whether to output fitting info
+#' @param verbosity Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)
 #' @param ... passed to init_adam so can be used to specify e.g. learning_rate.
 #'
 #' @returns Vector of log likelihoods through optimization (one per epoch).
@@ -88,10 +122,10 @@ sgd_glm = function(
     conc = 10.,
     learn_beta = T,
     learn_conc = T,
-    batch_size = 100,
-    epochs = 100,
-    loglik_tol = 0.01,
-    verbose = F,
+    batch_size = 10000,
+    epochs = 1000,
+    loglik_tol = 0.1,
+    verbosity = 0,
     ... # to pass to init_adam
 ) {
 
@@ -113,10 +147,12 @@ sgd_glm = function(
 
   logliks = old_loglik
 
-  if (verbose) {
+  if (verbosity >= 3) {
     cat("epoch", "loglik", "conc", "\n")
     cat(0, old_loglik, conc, "\n")
   }
+
+  ll_got_worse = F
 
   for (epoch in 1:epochs){
 
@@ -126,15 +162,37 @@ sgd_glm = function(
     if (learn_conc) conc = exp(adam_state$parameters$logconc)
 
     ll = loglik(conc, exp(X %*% b + o), y, w)
-    if (verbose) cat(epoch, ll, conc, "\n")
+    if (verbosity >= 3) cat(epoch, ll, conc, "\n")
 
     logliks = c(logliks, ll)
-    if (abs(ll - old_loglik) < loglik_tol) break
+    if (ll+1. < old_loglik) ll_got_worse = T
+
+    if ((epoch == epochs) || abs(ll - old_loglik) < loglik_tol) break
     old_loglik = ll
 
   }
 
-  list(logliks = logliks, adam_state = adam_state)
+  if (verbosity  >= 2) cat("Adam finished after",epoch,"epochs, log likelihood=",ll,".\n")
+
+  if (epoch == epochs) {
+    if (ll_got_worse)
+      warning("Log likelihood decreased at least once during optimization. You might want to decrease learning_rate (currently ",adam_state$learning_rate,") or increase batch_size (currently ",batch_size,").") else warning("Reached maximum number of epochs before convergence. The last two log likelihoods were ",format(old_loglik, digits=5),", ",format(ll, digits=5),". You might consider increasing the max number of epochs (currently ",epochs,") or learning_rate (currently ",adam_state$learning_rate,").")
+  }
+
+  se = get_standard_errors(X, y, w, o, b, conc, learn_conc = learn_conc)
+
+  names(b) = colnames(X)
+
+  list(
+    b = b,
+    conc = conc,
+    loglik = ll,
+    logliks = logliks,
+    se_beta = se$se_beta,
+    se_logconc = se$se_logconc,
+    epochs = epoch,
+    converged = epoch < epochs
+  )
 }
 
 #' Fit negative binomial (or Poisson) regression using Adam
@@ -144,71 +202,28 @@ sgd_glm = function(
 #' @param X NxP matrix of samples x covariates
 #' @param y N-vector of observed counts
 #' @param w Optional N-vector of observation weights
+#' @param o Offsets
 #' @param consider_poisson Whether to compare the final NB GLM fit to the Poisson GLM and choose the later if it has higher loglikelihood. .
-#' @param verbose Whether to output fitting info
+#' @param verbosity Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)
 #' @param ... passed to sgd_glm
 #'
 #' @export
-smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbose = F, ...) {
+smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbosity = 0, ...) {
 
   P = ncol(X)
-  if (verbose) cat("1. Linear model based initialization\n")
+  if (verbosity >= 1) cat("1. Linear model based initialization\n")
   b = if (P > 0) solve(t(X) %*% X, t(X) %*% log(y + 0.1)) else numeric(0)
 
-  if (verbose) cat("2. Fit Poisson GLM\n")
-  res = sgd_glm(X, y, w, o, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbose = verbose, ...)
+  if (verbosity >= 1) cat("2. Fit Poisson GLM\n")
+  pois_fit = sgd_glm(X, y, w, o, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
 
-  b_pois = res$adam_state$parameters$b
-  mu_pois = exp(X %*% b_pois + o)
-  ll_poi = loglik(Inf, mu_pois, y, w)
-
-  if (verbose) cat("3. Fit concentration parameter under NB GLM\n")
+  if (verbosity >= 1) cat("3. Fit concentration parameter under NB GLM\n")
   # it doesn't seem to hurt to also update beta at this stage.
   # should we regularize (log)conc a bit? if the data is Poisson (not overdispersed) then i believe
   # the likelihood is flat for conc -> inf, which is a bit weird for optimization
-  conc = 1
-  res = sgd_glm(X, y, w, o, b = b_pois, conc = conc, learn_beta = T, learn_conc = T, verbose = verbose, ...)
-  b = res$adam_state$parameters$b
-  conc = exp(res$adam_state$parameters$logconc)
+  nb_fit = sgd_glm(X, y, w, o, b = pois_fit$b, conc = 1, learn_beta = T, learn_conc = T, verbosity = verbosity, ...)
 
-  mu = exp(X %*% b + o)
-  ll = loglik(conc, mu, y, w)
-
-  if (consider_poisson && (ll_poi > ll)) {
-    b = b_pois
-    ll = ll_poi
-    conc = Inf
-    mu = mu_pois
-    dia = mu * grad_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
-    hess_b = t(X) %*% sweep(X, 1, dia, "*")
-    cov_b = chol2inv(chol(-hess_b))
-    se_b = sqrt(diag(cov_b))
-
-    se_logconc = NA
-  } else {
-
-    hess_c = -neg_hess_conc(conc, mu, y, w) * conc^2 + grad_conc(conc, mu, y, w) * conc
-    # se_logconc = sqrt(-1/hess_c)
-
-    dia = mu * grad_mu(conc, mu, y, w) - mu^2 * neg_hess_mu(conc, mu, y, w)
-    hess_b = t(X) %*% sweep(X, 1, dia, "*")
-
-    # cov_b = chol2inv(chol(-hess_b))
-    # se_b = sqrt(diag(cov_b))
-
-    hess_b_conc = t(X) %*% (mu * hess_conc_mu(conc, mu, y, w) * conc) # off diagonal of hessian
-
-    joint_hess = rbind( cbind(hess_b, hess_b_conc), c(hess_b_conc, hess_c) )
-    joint_cov = chol2inv(chol(-joint_hess))
-
-    joint_se = sqrt(diag(joint_cov))
-    se_beta = joint_se[1:P]
-    se_logconc = joint_se[P+1] # slightly wider
-  }
-
-  names(b) = colnames(X)
-
-  list(b = b, conc = conc, loglik = ll, se_beta = se_beta, se_logconc = se_logconc)
+  if (consider_poisson && (pois_fit$loglik > nb_fit$loglik)) pois_fit else nb_fit
 }
 
 #' Main function for fitting negative binomial or Poisson GLM using Adam.
@@ -223,7 +238,7 @@ smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbose = F, ...) 
 #' @param return_y Whether to return the response vector
 #' @param return_model Whether to return the model frame.
 #' @param contrasts an optional list. See the contrasts.arg of model.matrix.default.
-#' @param verbose Whether to print fitting info
+#' @param verbosity Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)
 #' @param ... Passed to smart_fit_nb_glm, then sgd_glm, and finally init_adam. Can control the optimization through `batch_size`, `epochs`, `loglik_tol`, `beta1`, `beta2`, `epsilon` and `learning_rate`.
 #'
 #' @export
@@ -236,7 +251,7 @@ adaglm = function(
     return_x = FALSE,
     return_y = FALSE,
     contrasts = NULL,
-    verbose = F,
+    verbosity = 0,
     ...) {
 
   mf <- Call <- match.call() # mf = model frame
@@ -254,14 +269,14 @@ adaglm = function(
   else if(any(w < 0)) stop("negative weights not allowed")
   o <- model.offset(mf)
   if (is.null(o)) o = y*0
-  if (verbose) cat("Fitting NB GLM.\n")
-  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, o, verbose = verbose, ...) else sgd_glm(X, y, w, o, conc = conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
+  if (verbosity >= 1) cat("Fitting NB GLM.\n")
+  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, o, verbosity = verbosity, ...) else sgd_glm(X, y, w, o, conc = conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
 
   X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 
-  if (verbose) cat("Fitting null model\n")
-  null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbose = verbose, ...)
-  null.deviance = -2. * null_fit$logliks[length(null_fit$logliks)] # might be better to fix conc here?
+  if (verbosity >= 1) cat("Fitting null model\n")
+  null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
+  null.deviance = -2. * null_fit$loglik # might be better to fix conc here?
   eta = X %*% myfit$b + o
 
   fit = list(
@@ -280,7 +295,9 @@ adaglm = function(
     aic = - 2. * myfit$loglik + 2*ncol(X) + 2,
     terms = Terms,
     formula = as.vector(attr(Terms, "formula")),
+    converged = myfit$converged,
     theta = myfit$conc,
+    iter = myfit$epochs,
     se_beta = myfit$se_beta,
     se_logconc = myfit$se_logconc
   )
