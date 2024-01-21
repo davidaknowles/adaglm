@@ -214,7 +214,12 @@ smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbosity = 0, ...
   if (verbosity >= 1) cat("1. Linear model based initialization\n")
   b = if (P > 0) solve(t(X) %*% X, t(X) %*% log(y + 0.1)) else numeric(0)
 
-  if (verbosity >= 1) cat("2. Fit Poisson GLM\n")
+  if (verbosity >= 1)
+    cat(
+      "Poisson GLM log likelihood=",
+      loglik(Inf, exp(X %*% b + o), y, w),
+      "\n2. Fit Poisson GLM\n")
+
   pois_fit = sgd_glm(X, y, w, o, b = b, conc = Inf, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
 
   if (verbosity >= 1) cat("3. Fit concentration parameter under NB GLM\n")
@@ -278,17 +283,22 @@ adaglm = function(
   null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
   null.deviance = -2. * null_fit$loglik # might be better to fix conc here?
   eta = X %*% myfit$b + o
+  fitted.values = exp(eta)
+
+  stds = sqrt(fitted.values + fitted.values*fitted.values / myfit$conc)
+  resid = (y - fitted.values) / stds
 
   fit = list(
     call = Call,
     rank = ncol(X), # assumes no colinearity
     df.residual = ncol(X) - ncol(X_null),
+    resid = resid,
     null.deviance = null.deviance,
     df.null = ncol(X_null),
     contrasts = attr(X, "contrasts"),
     xlevels = .getXlevels(Terms, mf),
     coefficients = myfit$b,
-    fitted.values = exp(eta),
+    fitted.values = fitted.values,
     linear.predictors	= eta,
     twologlik = 2. * myfit$loglik,
     deviance = -2. * myfit$loglik,
@@ -371,6 +381,40 @@ summary.adanb = function (object,  ...) {
       object$rank, object$df.residual, object$rank)))
   class(ans) <- "summary.glm"
   return(ans)
+}
+
+#' Pearson residuals
+#'
+#' These are calculated as in scTrasform, i.e. (y-mu)/s where mu is the expected value from the GLM and s is the standard deviation s=sqrt(mu+mu^2/theta) where theta is the "concentration" parameter, i.e. 1/dispersion.
+#'
+#' @param object A negative binomial GLM fit (adanb).
+#'
+#' @returns Pearson residuals
+#'
+#' @export
+residuals.adanb = function(object, ...) {
+  object$resid
+}
+
+#' Per datapoint p-values
+#'
+#' Calculates both one-sided and two-sided p-values against the null hypothesis that the counts are NB distributed with mean and overdispersion from the GLM fit.
+#'
+#' @param fit A negative binomial GLM fit (adanb).
+#' @param y Per datapoint counts.
+#'
+#' @returns List of
+#' \item{p_two_sided}{Tests whether y is lower OR higher than expected.}
+#' \item{p_lower}{p-value for y being lower than expected}
+#' \item{p_higher}{p for y being higher than expected}
+#'
+#' @export
+pointwise_pvalues = function(fit, y) {
+  mu = fitted(fit)
+  p_lower = pnbinom(y, mu=fitted(fit), size=fit$theta)
+  p_higher = pnbinom(y, mu=mu, size=fit$theta, lower=F) + dnbinom(y, mu=mu, size=fit$theta)
+  p_two_sided = pmin(p_lower, p_higher)
+  list(p_two_sided=p_two_sided, p_lower=p_lower, p_higher=p_higher)
 }
 
 

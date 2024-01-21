@@ -2,7 +2,7 @@
 % Please edit documentation in R/adam.R
 \name{adam_update}
 \alias{adam_update}
-\title{Perform an iteration of Adam otpimization}
+\title{Perform an iteration of Adam optimization}
 \usage{
 adam_update(g, adam_state)
 }
@@ -12,5 +12,5 @@ adam_update(g, adam_state)
 \item{adam_state}{Created by init_adam}
 }
 \description{
-Perform an iteration of Adam otpimization
+Perform an iteration of Adam optimization
 }

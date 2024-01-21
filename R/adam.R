@@ -1,5 +1,5 @@
 
-#' Perform an iteration of Adam otpimization
+#' Perform an iteration of Adam optimization
 #'
 #' @param g The gradient for the current minibatch
 #' @param adam_state Created by init_adam

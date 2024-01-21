@@ -33,6 +33,7 @@ df$y = y
 df$offs = offs
 head(df)
 ```
+
 Fit to obtain `glm` object. 
 ```{r}
 my_nb_fit = adaglm(
@@ -41,6 +42,7 @@ my_nb_fit = adaglm(
   batch_size = 200,
   verbosity = 2)
 ```
+
 ```{r}
 plot(c(0, true_b), my_nb_fit$coefficients, ylab = "Estimated coefficients", xlab = "True coefficients")
 ```
@@ -68,4 +70,14 @@ summary(my_nb_fit_null)
 
 ```{r}
 anova(my_nb_fit,my_nb_fit_null)
+```
+Calculate Pearson residuals ala sctransform. These can be used as a convenient continuous representation of the data that are close to N(0,1) distributed
+```{r}
+pearson_resid = residuals(my_nb_fit)
+hist(pearson_resid, 100)
+```
+
+```{r}
+pvalues = pointwise_pvalues(my_nb_fit, y)
+hist(pvalues$p_two_sided)
 ```
