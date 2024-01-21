@@ -197,7 +197,7 @@ sgd_glm = function(
 
 #' Fit negative binomial (or Poisson) regression using Adam
 #'
-#" Jointly optimizing the coefficients and concentration parameter from arbitrary points has poor learning dynamics. The initially poor coefficients result in an artifically small concentration. An effective solution is: 1) Fit a Poisson GLM. 2) Starting with coefficients initalized from the Poisson GLM, fit a NB GLM jointly optimizing the coefficients and concentration.
+#" Jointly optimizing the coefficients and concentration parameter from arbitrary points has poor learning dynamics. The initially poor coefficients result in an artificially small concentration. An effective solution is: 1) Fit a Poisson GLM. 2) Starting with coefficients initialized from the Poisson GLM, fit a NB GLM jointly optimizing the coefficients and concentration.
 #'
 #' @param X NxP matrix of samples x covariates
 #' @param y N-vector of observed counts
