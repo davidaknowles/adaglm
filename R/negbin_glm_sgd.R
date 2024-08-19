@@ -206,12 +206,13 @@ sgd_glm = function(
 #' @param y N-vector of observed counts
 #' @param w Optional N-vector of observation weights
 #' @param o Offsets
+#' @param conc Concentration parameter. NULL to learn it, or can be fixed to some value. Setting conc=Inf gives Poisson GLM.
 #' @param consider_poisson Whether to compare the final NB GLM fit to the Poisson GLM and choose the later if it has higher loglikelihood. .
 #' @param verbosity Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)
 #' @param ... passed to sgd_glm
 #'
 #' @export
-smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbosity = 0, ...) {
+smart_fit_nb_glm = function(X, y, w, o, conc = NULL, consider_poisson = T, verbosity = 0, ...) {
 
   P = ncol(X)
   if (verbosity >= 1) cat("1. Linear model based initialization\n")
@@ -229,10 +230,13 @@ smart_fit_nb_glm = function(X, y, w, o, consider_poisson = T, verbosity = 0, ...
   # it doesn't seem to hurt to also update beta at this stage.
   # should we regularize (log)conc a bit? if the data is Poisson (not overdispersed) then i believe
   # the likelihood is flat for conc -> inf, which is a bit weird for optimization
-  nb_fit = sgd_glm(X, y, w, o, b = pois_fit$b, conc = 1, learn_beta = T, learn_conc = T, verbosity = verbosity, ...)
+  if (is.null(conc))
+    conc = 1
+  nb_fit = sgd_glm(X, y, w, o, b = pois_fit$b, conc = conc, learn_beta = T, learn_conc = T, verbosity = verbosity, ...)
 
   if (consider_poisson && (pois_fit$loglik > nb_fit$loglik)) pois_fit else nb_fit
 }
+
 
 #' Main function for fitting negative binomial or Poisson GLM using Adam.
 #'
@@ -278,7 +282,7 @@ adaglm = function(
   o <- model.offset(mf)
   if (is.null(o)) o = y*0
   if (verbosity >= 1) cat("Fitting NB GLM.\n")
-  myfit = if (is.null(conc)) smart_fit_nb_glm(X, y, w, o, verbosity = verbosity, ...) else sgd_glm(X, y, w, o, conc = conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
+  myfit = smart_fit_nb_glm(X, y, w, o, conc = conc, verbosity = verbosity, ...)
 
   X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 

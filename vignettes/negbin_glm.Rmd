@@ -100,7 +100,14 @@ my_nb_fit_reduced = adaglm(
 (my_nb_fit_reduced$deviance - my_nb_fit$deviance) / (my_nb_fit$null.deviance - my_nb_fit$deviance)
 ```
 
-How much does V1 of the non-NB-sampling variance? 
+How much does V1 explain of the non-NB-sampling variance? 
 ```{r}
 (my_nb_fit_reduced$deviance - my_nb_fit$deviance) / my_nb_fit$null.deviance
 ```
+
+This is McFadden's R2 which makes little sense to me: 
+```{r}
+1-my_nb_fit$twologlik/my_nb_fit_reduced$twologlik
+```
+
+I think this could come out greater than 1 for continuous data! 
