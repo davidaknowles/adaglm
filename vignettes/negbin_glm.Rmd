@@ -58,18 +58,18 @@ Summary gives statistical significance for each covariate
 summary(my_nb_fit) # just "summary" should work here but gets 
 ```
 
-Use a likelihood ratio test to determine significance of one covariate (V1). 
+Use a likelihood ratio test to determine significance of one covariate (V1). Call this "reduced" to distinguish from "null" being intercept + offsets only. 
 ```{r}
-my_nb_fit_null = adaglm(
+my_nb_fit_reduced = adaglm(
   y ~ . - offs + offset(offs) - V1, 
   data = df, 
   batch_size = 200,
   verbosity = 2)
-summary(my_nb_fit_null)
+summary(my_nb_fit_reduced)
 ```
 
 ```{r}
-anova(my_nb_fit,my_nb_fit_null)
+anova(my_nb_fit,my_nb_fit_reduced)
 ```
 Calculate Pearson residuals ala sctransform. These can be used as a convenient continuous representation of the data that are close to N(0,1) distributed
 ```{r}
@@ -80,4 +80,27 @@ hist(pearson_resid, 100)
 ```{r}
 pvalues = pointwise_pvalues(my_nb_fit, y)
 hist(pvalues$p_two_sided)
+```
+
+```{r}
+R2deviance = 1 - my_nb_fit$deviance / my_nb_fit$null.deviance
+R2deviance
+```
+All the covariates together explain 92% of variance
+
+How much does V1 explain of the covariate-explainable variance? 
+```{r}
+my_nb_fit_reduced = adaglm(
+  y ~ . - offs + offset(offs) - V1, 
+  data = df, 
+  conc = my_nb_fit$theta,
+  batch_size = 200,
+  verbosity = 2)
+
+(my_nb_fit_reduced$deviance - my_nb_fit$deviance) / (my_nb_fit$null.deviance - my_nb_fit$deviance)
+```
+
+How much does V1 of the non-NB-sampling variance? 
+```{r}
+(my_nb_fit_reduced$deviance - my_nb_fit$deviance) / my_nb_fit$null.deviance
 ```

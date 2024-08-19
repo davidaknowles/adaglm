@@ -183,10 +183,13 @@ sgd_glm = function(
 
   names(b) = colnames(X)
 
+  saturated_loglik = loglik(conc, y, y, w) # MASS:ng.glm uses this "trick"
+
   list(
     b = b,
     conc = conc,
     loglik = ll,
+    deviance = 2 * (saturated_loglik - ll),
     logliks = logliks,
     se_beta = se$se_beta,
     se_logconc = se$se_logconc,
@@ -279,9 +282,9 @@ adaglm = function(
 
   X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 
-  if (verbosity >= 1) cat("Fitting null model\n")
+  if (verbosity >= 1) cat("Fitting null model\n") # Note conc is fixed here.
   null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
-  null.deviance = -2. * null_fit$loglik # might be better to fix conc here?
+
   eta = X %*% myfit$b + o
   fitted.values = exp(eta)
 
@@ -293,7 +296,7 @@ adaglm = function(
     rank = ncol(X), # assumes no colinearity
     df.residual = ncol(X) - ncol(X_null),
     resid = resid,
-    null.deviance = null.deviance,
+    null.deviance = null_fit$deviance,
     df.null = ncol(X_null),
     contrasts = attr(X, "contrasts"),
     xlevels = .getXlevels(Terms, mf),
@@ -301,7 +304,7 @@ adaglm = function(
     fitted.values = fitted.values,
     linear.predictors	= eta,
     twologlik = 2. * myfit$loglik,
-    deviance = -2. * myfit$loglik,
+    deviance = myfit$deviance,
     aic = - 2. * myfit$loglik + 2*ncol(X) + 2,
     terms = Terms,
     formula = as.vector(attr(Terms, "formula")),
