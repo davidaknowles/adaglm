@@ -91,7 +91,7 @@ All the covariates together explain 92% of variance
 How much does V1 explain of the covariate-explainable variance? 
 ```{r}
 my_nb_fit_reduced = adaglm(
-  y ~ . - offs + offset(offs) - V1, 
+  y ~ . - offs + offset(offs) - V1 - 1, 
   data = df, 
   conc = my_nb_fit$theta,
   batch_size = 200,

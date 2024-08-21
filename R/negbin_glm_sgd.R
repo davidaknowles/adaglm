@@ -206,13 +206,13 @@ sgd_glm = function(
 #' @param y N-vector of observed counts
 #' @param w Optional N-vector of observation weights
 #' @param o Offsets
-#' @param conc Concentration parameter. NULL to learn it, or can be fixed to some value. Setting conc=Inf gives Poisson GLM.
+#' @param fixed_conc Concentration parameter. NULL to learn it, or can be fixed to some value. Setting conc=Inf gives Poisson GLM.
 #' @param consider_poisson Whether to compare the final NB GLM fit to the Poisson GLM and choose the later if it has higher loglikelihood. .
 #' @param verbosity Integer between 0 (only print warnings) and 3 (print at every iteration of optimization)
 #' @param ... passed to sgd_glm
 #'
 #' @export
-smart_fit_nb_glm = function(X, y, w, o, conc = NULL, consider_poisson = T, verbosity = 0, ...) {
+smart_fit_nb_glm = function(X, y, w, o, fixed_conc = NULL, consider_poisson = T, verbosity = 0, ...) {
 
   P = ncol(X)
   if (verbosity >= 1) cat("1. Linear model based initialization\n")
@@ -230,9 +230,9 @@ smart_fit_nb_glm = function(X, y, w, o, conc = NULL, consider_poisson = T, verbo
   # it doesn't seem to hurt to also update beta at this stage.
   # should we regularize (log)conc a bit? if the data is Poisson (not overdispersed) then i believe
   # the likelihood is flat for conc -> inf, which is a bit weird for optimization
-  if (is.null(conc))
-    conc = 1
-  nb_fit = sgd_glm(X, y, w, o, b = pois_fit$b, conc = conc, learn_beta = T, learn_conc = T, verbosity = verbosity, ...)
+
+  init_conc = if (is.null(fixed_conc)) 1 else fixed_conc
+  nb_fit = sgd_glm(X, y, w, o, b = pois_fit$b, conc = init_conc, learn_beta = T, learn_conc = is.null(fixed_conc), verbosity = verbosity, ...)
 
   if (consider_poisson && (pois_fit$loglik > nb_fit$loglik)) pois_fit else nb_fit
 }
@@ -282,12 +282,18 @@ adaglm = function(
   o <- model.offset(mf)
   if (is.null(o)) o = y*0
   if (verbosity >= 1) cat("Fitting NB GLM.\n")
-  myfit = smart_fit_nb_glm(X, y, w, o, conc = conc, verbosity = verbosity, ...)
+  myfit = smart_fit_nb_glm(X, y, w, o, fixed_conc = conc, verbosity = verbosity, ...)
 
-  X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
 
   if (verbosity >= 1) cat("Fitting null model\n") # Note conc is fixed here.
-  null_fit = sgd_glm(X_null, y, w, o, conc = myfit$conc, learn_beta = T, learn_conc = F, verbosity = verbosity, ...)
+  X_null = if ("(Intercept)" %in% colnames(X)) X[, "(Intercept)", drop = FALSE] else X[,0,drop=F]
+  if (ncol(X_null) > 0) {
+    null_fit = smart_fit_nb_glm(X_null, y, w, o, fixed_conc = myfit$conc, verbosity = verbosity, ...)
+    null_deviance = null_fit$deviance
+  } else {
+    warning("No intercept included in null model")
+    null_deviance = 2 * (loglik(myfit$conc, y, y, w) - loglik(myfit$conc, 0, y, w))
+  }
 
   eta = X %*% myfit$b + o
   fitted.values = exp(eta)
@@ -300,7 +306,7 @@ adaglm = function(
     rank = ncol(X), # assumes no colinearity
     df.residual = ncol(X) - ncol(X_null),
     resid = resid,
-    null.deviance = null_fit$deviance,
+    null.deviance = null_deviance,
     df.null = ncol(X_null),
     contrasts = attr(X, "contrasts"),
     xlevels = .getXlevels(Terms, mf),
